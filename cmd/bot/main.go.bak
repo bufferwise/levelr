@@ -1,0 +1,161 @@
+package main
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/disgoorg/disgo/bot"
+
+	appbot "github.com/bufferwise/levelr/internal/bot"
+	"github.com/bufferwise/levelr/internal/cache"
+	"github.com/bufferwise/levelr/internal/config"
+	"github.com/bufferwise/levelr/internal/db"
+	db_sqlc "github.com/bufferwise/levelr/internal/db/sqlc"
+	"github.com/bufferwise/levelr/internal/handler"
+	"github.com/bufferwise/levelr/internal/module"
+	"github.com/bufferwise/levelr/internal/modules/drops"
+	"github.com/bufferwise/levelr/internal/modules/leveling"
+	"github.com/bufferwise/levelr/internal/modules/presence"
+	"github.com/bufferwise/levelr/internal/services"
+	"github.com/lmittmann/tint"
+)
+
+func main() {
+	// Structured colored logging
+	slog.SetDefault(slog.New(
+		tint.NewHandler(os.Stdout, &tint.Options{
+			Level:      slog.LevelInfo,
+			TimeFormat: time.TimeOnly,
+		}),
+	))
+
+	// Load configuration
+	cfg := config.Load()
+	slog.Info("config loaded",
+		slog.Uint64("main_guild_id", cfg.MainGuildID),
+		slog.Int("msg_xp_cooldown", cfg.MsgXPCooldown),
+	)
+
+	// Database pool
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pgPool, err := db.NewPool(ctx, cfg.DBUrl)
+	if err != nil {
+		slog.Error("failed to connect to database", slog.Any("err", err))
+		os.Exit(1)
+	}
+	defer pgPool.Close()
+
+	// Valkey client
+	vkClient, err := cache.New(cfg.ValkeyAddr)
+	if err != nil {
+		slog.Error("failed to connect to valkey", slog.Any("err", err))
+		os.Exit(1)
+	}
+	defer vkClient.Close()
+
+	queries := db_sqlc.New(pgPool)
+
+	// Create Bot Client first (without listeners)
+	client, err := appbot.SetupBot(cfg)
+	if err != nil {
+		slog.Error("failed to initial setup bot", slog.Any("err", err))
+		os.Exit(1)
+	}
+
+	// Internal core services bound structurally.
+	notifSvc := services.NewNotifier(client, cfg)
+	blSvc := services.NewBlacklistService(queries, vkClient)
+	multSvc := services.NewMultiplierService(queries, vkClient)
+
+	// Initialize the modular interaction router
+	router := handler.NewRouter()
+
+	// Apply Middlewares structurally globally
+	router.Use(handler.ErrorCatcher())
+	router.Use(handler.GuildGuard(cfg))
+
+	// Initialize Module Registry
+	registry := module.NewRegistry(router)
+
+	if cfg.ModuleLeveling {
+		lvlMod := leveling.New(cfg, queries, client, vkClient, blSvc, multSvc, notifSvc)
+		registry.Register(lvlMod)
+	}
+	if cfg.ModuleDrops {
+		dropMod := drops.New(cfg, queries, client)
+		registry.Register(dropMod)
+	}
+	if cfg.YoutubePresence {
+		presenceMod := presence.New(cfg, client)
+		registry.Register(presenceMod)
+	}
+
+	// Combine module contributions for Admin Command
+	var adminContribs []module.AdminSubDef
+	for _, m := range registry.Modules() {
+		if ac, ok := m.(module.AdminContributor); ok {
+			adminContribs = append(adminContribs, ac.AdminSubCommands()...)
+		}
+	}
+	adminCmd := appbot.BuildAdminCommand(adminContribs)
+
+	// Route internal core bot commands dynamically strictly checking conditions functionally
+	router.SubCommandGroup("admin", "blacklist", "add", appbot.HandleBlacklistAdd(queries, vkClient))
+	router.SubCommandGroup("admin", "blacklist", "remove", appbot.HandleBlacklistRemove(queries, vkClient))
+	router.SubCommandGroup("admin", "multiplier", "set", appbot.HandleMultiplierSet(queries, vkClient))
+
+	// Link router interactions generically directly logically
+	client.AddEventListeners(
+		bot.NewListenerFunc(appbot.OnReadyFunc(cfg)),
+		appbot.OnGuildsReadyHandler(cfg, vkClient),
+		router.CommandListener(),
+		router.ButtonListener(),
+	)
+
+	// Boot up modules generically structurally (collecting commands and listeners)
+	commands, listeners, cancelWorkers := registry.Boot(ctx, client)
+	defer cancelWorkers() // Cleans up worker context mapped natively
+
+	if len(listeners) > 0 {
+		client.AddEventListeners(listeners...)
+	}
+
+	// Append core logically structured composites
+	commands = append(commands, adminCmd)
+
+	// 1. Open gateway explicitly mapping structural interactions
+	connectCtx, connectCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer connectCancel()
+	if err = client.OpenGateway(connectCtx); err != nil {
+		slog.Error("failed to open gateway", slog.Any("err", err))
+		os.Exit(1)
+	}
+
+	// 2. Register correctly resolved slash commands universally mapped structurally natively
+	err = appbot.RegisterCommands(client, cfg.MainGuildID, commands...)
+	if err != nil {
+		slog.Error("failed to register commands", slog.Any("err", err))
+	}
+
+	slog.Info("bot is running — press CTRL+C to exit")
+
+	// Wait for shutdown signal explicitly logically cleanly natively
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	slog.Info("shutdown signal received")
+	cancel() // Cancels overarching context struct natively terminating routines logically clean
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	client.Close(shutdownCtx)
+
+	slog.Info("clean shutdown complete")
+}

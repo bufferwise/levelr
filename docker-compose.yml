@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: levelr-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bot
+      POSTGRES_PASSWORD: bot
+      POSTGRES_DB: levelr
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: levelr-valkey
+    restart: unless-stopped
+    command: valkey-server --maxmemory-policy noeviction
+    ports:
+      - "6379:6379"
+    volumes:
+      - vkdata:/data
+
+volumes:
+  pgdata:
+  vkdata:
