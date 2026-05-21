@@ -38,10 +38,25 @@ type AchievementProgress struct {
 }
 
 type Blacklist struct {
-	EntityType string    `json:"entity_type"`
-	EntityID   int64     `json:"entity_id"`
-	AddedBy    int64     `json:"added_by"`
-	AddedAt    time.Time `json:"added_at"`
+	GuildID    string       `json:"guild_id"`
+	EntityType string       `json:"entity_type"`
+	EntityID   string       `json:"entity_id"`
+	Reason     string       `json:"reason"`
+	AddedBy    string       `json:"added_by"`
+	IsHidden   bool         `json:"is_hidden"`
+	ExpiresAt  sql.NullTime `json:"expires_at"`
+	AddedAt    time.Time    `json:"added_at"`
+}
+
+type BlacklistAudit struct {
+	ID         int64          `json:"id"`
+	GuildID    string         `json:"guild_id"`
+	EntityType string         `json:"entity_type"`
+	EntityID   string         `json:"entity_id"`
+	Action     string         `json:"action"`
+	Reason     sql.NullString `json:"reason"`
+	ActorID    string         `json:"actor_id"`
+	CreatedAt  time.Time      `json:"created_at"`
 }
 
 type BlacklistsOld struct {
@@ -69,16 +84,19 @@ type Drop struct {
 }
 
 type Giveaway struct {
-	ID           int64         `json:"id"`
-	ChannelID    int64         `json:"channel_id"`
-	MessageID    int64         `json:"message_id"`
-	Prize        string        `json:"prize"`
-	WinnerCount  int64         `json:"winner_count"`
-	RequiredRole sql.NullInt64 `json:"required_role"`
-	HostID       int64         `json:"host_id"`
-	EndsAt       time.Time     `json:"ends_at"`
-	Ended        bool          `json:"ended"`
-	CreatedAt    time.Time     `json:"created_at"`
+	ID              int64         `json:"id"`
+	ChannelID       int64         `json:"channel_id"`
+	MessageID       int64         `json:"message_id"`
+	Prize           string        `json:"prize"`
+	WinnerCount     int64         `json:"winner_count"`
+	RequiredRole    sql.NullInt64 `json:"required_role"`
+	HostID          int64         `json:"host_id"`
+	EndsAt          time.Time     `json:"ends_at"`
+	Ended           bool          `json:"ended"`
+	MinLevel        int64         `json:"min_level"`
+	MinAccountDays  int64         `json:"min_account_days"`
+	RoleMultipliers string        `json:"role_multipliers"`
+	CreatedAt       time.Time     `json:"created_at"`
 }
 
 type GiveawayEntry struct {

@@ -27,7 +27,7 @@ var RankCommand = discord.SlashCommandCreate{
 	},
 }
 
-func HandleRank(queries *db.Queries) handler.CommandHandler {
+func HandleRank(queries *db.Queries, blSvc *services.BlacklistService) handler.CommandHandler {
 	return func(ctx context.Context, e *events.ApplicationCommandInteractionCreate) error {
 		target := e.User()
 		data := e.SlashCommandInteractionData()
@@ -96,19 +96,41 @@ func HandleRank(queries *db.Queries) handler.CommandHandler {
 		}
 		bar := strings.Repeat("█", filled) + strings.Repeat("░", barLen-filled)
 
+		// Check blacklist status
+		blStatus, _ := blSvc.GetFullUserStatus(ctx, strconv.FormatInt(guildID, 10), uint64(target.ID))
+		var blBlock string
+		if blStatus.IsBlacklisted && !blStatus.IsHidden {
+			expiresDesc := "permanently"
+			if blStatus.ExpiresAt != nil {
+				expiresDesc = fmt.Sprintf("expires <t:%d:R>", blStatus.ExpiresAt.Unix())
+			}
+			var inheritedDesc string
+			if strings.ToLower(blStatus.SourceType) != "user" && blStatus.SourceType != "" {
+				inheritedDesc = fmt.Sprintf(" (inherited from %s)", blStatus.SourceType)
+			}
+			blBlock = fmt.Sprintf(
+				"\n\n⚠️ **Note:** You are currently blacklisted from earning XP%s: *%s* (%s).",
+				inheritedDesc,
+				blStatus.Reason,
+				expiresDesc,
+			)
+		}
+
 		// Build professional sleek minimalistic description
 		rankText := fmt.Sprintf(
 			"## 📊 **∫ %s's Stats**\n"+
 				"**Level %d** • `%d / %d XP` • `%.1f%%`\n"+
 				"%s\n\n"+
 				"**🏆 Leaderboard Rank:** `#%d`\n"+
-				"**📅 Weekly Rank:** `💬 #%d` • `🎙️ #%d`",
+				"**📅 Weekly Rank:** `💬 #%d` • `🎙️ #%d`"+
+				"%s",
 			target.Username,
 			currentLevel, xpProgress, xpForNext, percentage,
 			bar,
 			xpRank,
 			weeklyMsgRank,
 			weeklyVCRank,
+			blBlock,
 		)
 
 		return e.CreateMessage(discord.NewMessageCreate().
@@ -241,10 +263,14 @@ func buildLeaderboardMessage(ctx context.Context, queries *db.Queries, guildID i
 	}
 
 	var messageCreate discord.MessageCreate
-	// Always use silent messages for leaderboard
-	messageCreate = discord.NewMessageCreate().WithContent(content).AddActionRow(buttons...).WithAllowedMentions(&discord.AllowedMentions{
-		Parse: []discord.AllowedMentionType{}, // No pings - always silent
-	})
+	// Always use silent (notifications suppressed) messages for leaderboard
+	messageCreate = discord.NewMessageCreate().
+		WithContent(content).
+		AddActionRow(buttons...).
+		WithAllowedMentions(&discord.AllowedMentions{
+			Parse: []discord.AllowedMentionType{}, // No pings - always silent
+		}).
+		WithFlags(discord.MessageFlagSuppressNotifications)
 
 	return messageCreate, buttons
 }
@@ -290,7 +316,8 @@ func HandleLeaderboardButton(queries *db.Queries) handler.ButtonHandler {
 		msgUpdate := discord.NewMessageUpdate().
 			WithContent(msgCreate.Content).
 			WithEmbeds(msgCreate.Embeds...).
-			WithComponents(msgCreate.Components...)
+			WithComponents(msgCreate.Components...).
+			WithAllowedMentions(msgCreate.AllowedMentions)
 
 		err := e.UpdateMessage(msgUpdate)
 		if err == nil {

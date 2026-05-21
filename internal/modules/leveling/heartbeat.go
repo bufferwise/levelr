@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/disgoorg/disgo/bot"
@@ -22,13 +23,24 @@ func StartVoiceTicker(cfg *config.Config, client *bot.Client, cacheClient *cache
 		defer ticker.Stop()
 
 		slog.Info("voice heartbeat ticker started [leveling module]")
+		var lastRun time.Time
 
 		for {
 			select {
 			case <-ctx.Done():
+				slog.Info("voice heartbeat ticker stopping, performing final flush...")
+				// Only perform final flush if it's been more than 10 seconds since the last run to prevent double-awarding
+				if time.Since(lastRun) > 10*time.Second {
+					flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+					processHeartbeat(flushCtx, cfg, client, cacheClient, blSvc, multSvc, xpSvc)
+					cancel()
+				} else {
+					slog.Info("voice heartbeat already processed recently, skipping final flush")
+				}
 				slog.Info("voice heartbeat ticker stopped")
 				return
 			case <-ticker.C:
+				lastRun = time.Now()
 				processHeartbeat(ctx, cfg, client, cacheClient, blSvc, multSvc, xpSvc)
 			}
 		}
@@ -36,10 +48,19 @@ func StartVoiceTicker(cfg *config.Config, client *bot.Client, cacheClient *cache
 }
 
 func processHeartbeat(ctx context.Context, cfg *config.Config, client *bot.Client, cacheClient *cache.Client, blSvc *services.BlacklistService, multSvc *services.MultiplierService, xpSvc *XPService) {
+	// Create a detached context with a timeout so that the DB/Valkey queries survive main context cancellation during shutdown
+	detachedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+
 	// 1. Scan active sessions from Valkey
-	sessions, err := cacheClient.GetActiveVoiceSessions(ctx, cfg.MainGuildID)
+	sessions, err := cacheClient.GetActiveVoiceSessions(detachedCtx, cfg.MainGuildID)
 	if err != nil {
-		slog.Error("failed to scan active voice sessions", slog.Any("err", err))
+		// Suppress noisy connection/closing errors when the bot or Valkey is shutting down
+		if strings.Contains(err.Error(), "valkey client is closing") || strings.Contains(err.Error(), "unable to connect") {
+			slog.Debug("valkey connection closed during shutdown", slog.Any("err", err))
+		} else {
+			slog.Error("failed to scan active voice sessions", slog.Any("err", err))
+		}
 		return
 	}
 
@@ -57,7 +78,7 @@ func processHeartbeat(ctx context.Context, cfg *config.Config, client *bot.Clien
 		vs, ok := client.Caches.VoiceState(mainGuildID, userID)
 		if !ok || vs.ChannelID == nil {
 			// User left VC but Valkey stale — cleanup
-			cacheClient.DeleteVoiceSession(ctx, cfg.MainGuildID, session.UserID)
+			cacheClient.DeleteVoiceSession(detachedCtx, cfg.MainGuildID, session.UserID)
 			continue
 		}
 
@@ -91,25 +112,25 @@ func processHeartbeat(ctx context.Context, cfg *config.Config, client *bot.Clien
 		// 4. Blacklist check
 		roleIDs := appbot.SnowflakeSliceToUint64(member.RoleIDs)
 		guildIDStr := strconv.FormatUint(uint64(mainGuildID), 10)
-		isBl, _ := blSvc.IsUserBlacklisted(ctx, uint64(userID), uint64(*vs.ChannelID), roleIDs, guildIDStr)
+		isBl, _ := blSvc.IsUserBlacklisted(detachedCtx, uint64(userID), uint64(*vs.ChannelID), roleIDs, guildIDStr)
 		if isBl {
 			slog.Debug("skipping voice XP (blacklisted)", slog.Uint64("user_id", uint64(userID)))
 			continue
 		}
 
 		// 5. Award XP
-		multiplier, _ := multSvc.Compute(ctx, uint64(userID), uint64(*vs.ChannelID), roleIDs, strconv.FormatUint(uint64(mainGuildID), 10))
+		multiplier, _ := multSvc.Compute(detachedCtx, uint64(userID), uint64(*vs.ChannelID), roleIDs, strconv.FormatUint(uint64(mainGuildID), 10))
 		xpToAward := int64(math.Round(10.0 * multiplier)) // 10 base XP
 		if xpToAward < 1 {
 			xpToAward = 1
 		}
 
-		slog.Info("calculating voice XP", 
+		slog.Debug("calculating voice XP", 
 			slog.Uint64("user_id", uint64(userID)), 
 			slog.Float64("multiplier", multiplier), 
 			slog.Int64("xp_final", xpToAward))
 
-		err := xpSvc.AwardVoiceXP(ctx, uint64(userID), uint64(mainGuildID), xpToAward, weekStart)
+		err := xpSvc.AwardVoiceXP(detachedCtx, uint64(userID), uint64(mainGuildID), xpToAward, weekStart)
 		if err != nil {
 			slog.Error("failed to award voice XP", slog.Uint64("user_id", uint64(userID)), slog.Any("err", err))
 		}

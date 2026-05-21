@@ -22,6 +22,24 @@ func (q *Queries) CountEntries(ctx context.Context, giveawayID int64) (int64, er
 	return count, err
 }
 
+const deleteEntriesForGiveaway = `-- name: DeleteEntriesForGiveaway :exec
+DELETE FROM giveaway_entries WHERE giveaway_id = ?
+`
+
+func (q *Queries) DeleteEntriesForGiveaway(ctx context.Context, giveawayID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteEntriesForGiveaway, giveawayID)
+	return err
+}
+
+const deleteGiveaway = `-- name: DeleteGiveaway :exec
+DELETE FROM giveaways WHERE id = ?
+`
+
+func (q *Queries) DeleteGiveaway(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteGiveaway, id)
+	return err
+}
+
 const endGiveaway = `-- name: EndGiveaway :exec
 UPDATE giveaways SET ended = 1 WHERE id = ?
 `
@@ -32,7 +50,7 @@ func (q *Queries) EndGiveaway(ctx context.Context, id int64) error {
 }
 
 const getActiveGiveawayByMessage = `-- name: GetActiveGiveawayByMessage :one
-SELECT id, channel_id, message_id, prize, winner_count, required_role, host_id, ends_at, ended, created_at FROM giveaways WHERE message_id = ? AND ended = 0
+SELECT id, channel_id, message_id, prize, winner_count, required_role, host_id, ends_at, ended, min_level, min_account_days, role_multipliers, created_at FROM giveaways WHERE message_id = ? AND ended = 0
 `
 
 func (q *Queries) GetActiveGiveawayByMessage(ctx context.Context, messageID int64) (Giveaway, error) {
@@ -48,13 +66,16 @@ func (q *Queries) GetActiveGiveawayByMessage(ctx context.Context, messageID int6
 		&i.HostID,
 		&i.EndsAt,
 		&i.Ended,
+		&i.MinLevel,
+		&i.MinAccountDays,
+		&i.RoleMultipliers,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getGiveaway = `-- name: GetGiveaway :one
-SELECT id, channel_id, message_id, prize, winner_count, required_role, host_id, ends_at, ended, created_at FROM giveaways WHERE id = ?
+SELECT id, channel_id, message_id, prize, winner_count, required_role, host_id, ends_at, ended, min_level, min_account_days, role_multipliers, created_at FROM giveaways WHERE id = ?
 `
 
 func (q *Queries) GetGiveaway(ctx context.Context, id int64) (Giveaway, error) {
@@ -70,6 +91,34 @@ func (q *Queries) GetGiveaway(ctx context.Context, id int64) (Giveaway, error) {
 		&i.HostID,
 		&i.EndsAt,
 		&i.Ended,
+		&i.MinLevel,
+		&i.MinAccountDays,
+		&i.RoleMultipliers,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getGiveawayByMessage = `-- name: GetGiveawayByMessage :one
+SELECT id, channel_id, message_id, prize, winner_count, required_role, host_id, ends_at, ended, min_level, min_account_days, role_multipliers, created_at FROM giveaways WHERE message_id = ?
+`
+
+func (q *Queries) GetGiveawayByMessage(ctx context.Context, messageID int64) (Giveaway, error) {
+	row := q.db.QueryRowContext(ctx, getGiveawayByMessage, messageID)
+	var i Giveaway
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.MessageID,
+		&i.Prize,
+		&i.WinnerCount,
+		&i.RequiredRole,
+		&i.HostID,
+		&i.EndsAt,
+		&i.Ended,
+		&i.MinLevel,
+		&i.MinAccountDays,
+		&i.RoleMultipliers,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -107,19 +156,25 @@ func (q *Queries) InsertEntry(ctx context.Context, arg InsertEntryParams) error 
 }
 
 const insertGiveaway = `-- name: InsertGiveaway :one
-INSERT INTO giveaways (channel_id, message_id, prize, winner_count, required_role, host_id, ends_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-RETURNING id, channel_id, message_id, prize, winner_count, required_role, host_id, ends_at, ended, created_at
+INSERT INTO giveaways (
+    channel_id, message_id, prize, winner_count, required_role, host_id, ends_at,
+    min_level, min_account_days, role_multipliers
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, channel_id, message_id, prize, winner_count, required_role, host_id, ends_at, ended, min_level, min_account_days, role_multipliers, created_at
 `
 
 type InsertGiveawayParams struct {
-	ChannelID    int64         `json:"channel_id"`
-	MessageID    int64         `json:"message_id"`
-	Prize        string        `json:"prize"`
-	WinnerCount  int64         `json:"winner_count"`
-	RequiredRole sql.NullInt64 `json:"required_role"`
-	HostID       int64         `json:"host_id"`
-	EndsAt       time.Time     `json:"ends_at"`
+	ChannelID       int64         `json:"channel_id"`
+	MessageID       int64         `json:"message_id"`
+	Prize           string        `json:"prize"`
+	WinnerCount     int64         `json:"winner_count"`
+	RequiredRole    sql.NullInt64 `json:"required_role"`
+	HostID          int64         `json:"host_id"`
+	EndsAt          time.Time     `json:"ends_at"`
+	MinLevel        int64         `json:"min_level"`
+	MinAccountDays  int64         `json:"min_account_days"`
+	RoleMultipliers string        `json:"role_multipliers"`
 }
 
 func (q *Queries) InsertGiveaway(ctx context.Context, arg InsertGiveawayParams) (Giveaway, error) {
@@ -131,6 +186,9 @@ func (q *Queries) InsertGiveaway(ctx context.Context, arg InsertGiveawayParams) 
 		arg.RequiredRole,
 		arg.HostID,
 		arg.EndsAt,
+		arg.MinLevel,
+		arg.MinAccountDays,
+		arg.RoleMultipliers,
 	)
 	var i Giveaway
 	err := row.Scan(
@@ -143,9 +201,53 @@ func (q *Queries) InsertGiveaway(ctx context.Context, arg InsertGiveawayParams) 
 		&i.HostID,
 		&i.EndsAt,
 		&i.Ended,
+		&i.MinLevel,
+		&i.MinAccountDays,
+		&i.RoleMultipliers,
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listActive = `-- name: ListActive :many
+SELECT id, channel_id, message_id, prize, winner_count, required_role, host_id, ends_at, ended, min_level, min_account_days, role_multipliers, created_at FROM giveaways WHERE ended = 0
+`
+
+func (q *Queries) ListActive(ctx context.Context) ([]Giveaway, error) {
+	rows, err := q.db.QueryContext(ctx, listActive)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Giveaway
+	for rows.Next() {
+		var i Giveaway
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.MessageID,
+			&i.Prize,
+			&i.WinnerCount,
+			&i.RequiredRole,
+			&i.HostID,
+			&i.EndsAt,
+			&i.Ended,
+			&i.MinLevel,
+			&i.MinAccountDays,
+			&i.RoleMultipliers,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listEntries = `-- name: ListEntries :many
@@ -176,7 +278,7 @@ func (q *Queries) ListEntries(ctx context.Context, giveawayID int64) ([]int64, e
 }
 
 const listExpiredUnended = `-- name: ListExpiredUnended :many
-SELECT id, channel_id, message_id, prize, winner_count, required_role, host_id, ends_at, ended, created_at FROM giveaways WHERE ended = 0 AND ends_at <= CURRENT_TIMESTAMP
+SELECT id, channel_id, message_id, prize, winner_count, required_role, host_id, ends_at, ended, min_level, min_account_days, role_multipliers, created_at FROM giveaways WHERE ended = 0 AND ends_at <= CURRENT_TIMESTAMP
 `
 
 func (q *Queries) ListExpiredUnended(ctx context.Context) ([]Giveaway, error) {
@@ -198,6 +300,9 @@ func (q *Queries) ListExpiredUnended(ctx context.Context) ([]Giveaway, error) {
 			&i.HostID,
 			&i.EndsAt,
 			&i.Ended,
+			&i.MinLevel,
+			&i.MinAccountDays,
+			&i.RoleMultipliers,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

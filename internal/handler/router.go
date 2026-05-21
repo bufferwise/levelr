@@ -74,6 +74,11 @@ func (r *Router) Button(prefix string, h ButtonHandler) {
 	r.buttons[prefix] = h
 }
 
+// Select binds interactions matching prefix identifier rules strictly for select menus.
+func (r *Router) Select(prefix string, h SelectMenuHandler) {
+	r.selects[prefix] = h
+}
+
 // Use defines the standard middleware operational stack mapped internally.
 func (r *Router) Use(mw ...Middleware) {
 	r.middleware = append(r.middleware, mw...)
@@ -138,6 +143,61 @@ func (r *Router) ButtonListener() bot.EventListener {
 		}
 
 		// Safe fallback standard contextual response mapping evaluation patterns implicitly structured contextually
+		_ = handler(context.Background(), e)
+	})
+}
+
+// SelectListener evaluates custom id prefix bindings natively executing context responses for select menus.
+func (r *Router) SelectListener() bot.EventListener {
+	return bot.NewListenerFunc(func(e *events.ComponentInteractionCreate) {
+		if e.Data.Type() == discord.ComponentTypeButton {
+			return
+		}
+
+		customID := e.Data.CustomID()
+
+		var handler SelectMenuHandler
+		var longest string
+
+		for prefix, h := range r.selects {
+			if strings.HasPrefix(customID, prefix) && len(prefix) > len(longest) {
+				longest = prefix
+				handler = h
+			}
+		}
+
+		if handler == nil {
+			return
+		}
+
+		_ = handler(context.Background(), e)
+	})
+}
+
+// Modal registers a modal submit discrete mapping handler.
+func (r *Router) Modal(prefix string, h ModalHandler) {
+	r.modals[prefix] = h
+}
+
+// ModalListener evaluates custom id prefix bindings natively executing context responses for modal submits.
+func (r *Router) ModalListener() bot.EventListener {
+	return bot.NewListenerFunc(func(e *events.ModalSubmitInteractionCreate) {
+		customID := e.Data.CustomID
+
+		var handler ModalHandler
+		var longest string
+
+		for prefix, h := range r.modals {
+			if strings.HasPrefix(customID, prefix) && len(prefix) > len(longest) {
+				longest = prefix
+				handler = h
+			}
+		}
+
+		if handler == nil {
+			return
+		}
+
 		_ = handler(context.Background(), e)
 	})
 }

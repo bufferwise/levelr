@@ -7,47 +7,176 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
-const addBlacklist = `-- name: AddBlacklist :exec
-INSERT INTO blacklist (entity_type, entity_id, added_by) VALUES (?1, ?2, 0) ON CONFLICT (entity_type, entity_id) DO NOTHING
+const addAuditLog = `-- name: AddAuditLog :exec
+INSERT INTO blacklist_audit (guild_id, entity_type, entity_id, action, reason, actor_id)
+VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6
+)
 `
 
-type AddBlacklistParams struct {
-	EntityType string `json:"entityType"`
-	TargetId   int64  `json:"targetId"`
+type AddAuditLogParams struct {
+	GuildId    string         `json:"guildId"`
+	EntityType string         `json:"entityType"`
+	EntityId   string         `json:"entityId"`
+	Action     string         `json:"action"`
+	Reason     sql.NullString `json:"reason"`
+	ActorId    string         `json:"actorId"`
 }
 
-func (q *Queries) AddBlacklist(ctx context.Context, arg AddBlacklistParams) error {
-	_, err := q.db.ExecContext(ctx, addBlacklist, arg.EntityType, arg.TargetId)
+func (q *Queries) AddAuditLog(ctx context.Context, arg AddAuditLogParams) error {
+	_, err := q.db.ExecContext(ctx, addAuditLog,
+		arg.GuildId,
+		arg.EntityType,
+		arg.EntityId,
+		arg.Action,
+		arg.Reason,
+		arg.ActorId,
+	)
 	return err
 }
 
-const isBlacklisted = `-- name: IsBlacklisted :one
-SELECT EXISTS(
-  SELECT 1 FROM blacklist WHERE entity_id = ?1 AND entity_type = ?2
-) AS is_blacklisted
+const addBlacklist = `-- name: AddBlacklist :exec
+INSERT INTO blacklist (guild_id, entity_type, entity_id, reason, added_by, is_hidden, expires_at)
+VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7
+)
+ON CONFLICT (guild_id, entity_type, entity_id) DO UPDATE SET
+    reason = excluded.reason,
+    added_by = excluded.added_by,
+    is_hidden = excluded.is_hidden,
+    expires_at = excluded.expires_at,
+    added_at = CURRENT_TIMESTAMP
 `
 
-type IsBlacklistedParams struct {
-	EntityId   int64  `json:"entityId"`
+type AddBlacklistParams struct {
+	GuildId    string       `json:"guildId"`
+	EntityType string       `json:"entityType"`
+	EntityId   string       `json:"entityId"`
+	Reason     string       `json:"reason"`
+	AddedBy    string       `json:"addedBy"`
+	IsHidden   bool         `json:"isHidden"`
+	ExpiresAt  sql.NullTime `json:"expiresAt"`
+}
+
+func (q *Queries) AddBlacklist(ctx context.Context, arg AddBlacklistParams) error {
+	_, err := q.db.ExecContext(ctx, addBlacklist,
+		arg.GuildId,
+		arg.EntityType,
+		arg.EntityId,
+		arg.Reason,
+		arg.AddedBy,
+		arg.IsHidden,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
+const getAuditLogs = `-- name: GetAuditLogs :many
+SELECT id, guild_id, entity_type, entity_id, action, reason, actor_id, created_at
+FROM blacklist_audit
+WHERE guild_id = ?1
+ORDER BY created_at DESC
+LIMIT ?3 OFFSET ?2
+`
+
+type GetAuditLogsParams struct {
+	GuildId   string `json:"guildId"`
+	OffsetVal int64  `json:"offsetVal"`
+	LimitVal  int64  `json:"limitVal"`
+}
+
+func (q *Queries) GetAuditLogs(ctx context.Context, arg GetAuditLogsParams) ([]BlacklistAudit, error) {
+	rows, err := q.db.QueryContext(ctx, getAuditLogs, arg.GuildId, arg.OffsetVal, arg.LimitVal)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BlacklistAudit
+	for rows.Next() {
+		var i BlacklistAudit
+		if err := rows.Scan(
+			&i.ID,
+			&i.GuildID,
+			&i.EntityType,
+			&i.EntityID,
+			&i.Action,
+			&i.Reason,
+			&i.ActorID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getBlacklistDetails = `-- name: GetBlacklistDetails :one
+SELECT guild_id, entity_type, entity_id, reason, added_by, is_hidden, expires_at, added_at
+FROM blacklist 
+WHERE guild_id = ?1 
+  AND entity_type = ?2 
+  AND entity_id = ?3
+`
+
+type GetBlacklistDetailsParams struct {
+	GuildId    string `json:"guildId"`
 	EntityType string `json:"entityType"`
+	EntityId   string `json:"entityId"`
 }
 
-func (q *Queries) IsBlacklisted(ctx context.Context, arg IsBlacklistedParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, isBlacklisted, arg.EntityId, arg.EntityType)
-	var is_blacklisted int64
-	err := row.Scan(&is_blacklisted)
-	return is_blacklisted, err
+func (q *Queries) GetBlacklistDetails(ctx context.Context, arg GetBlacklistDetailsParams) (Blacklist, error) {
+	row := q.db.QueryRowContext(ctx, getBlacklistDetails, arg.GuildId, arg.EntityType, arg.EntityId)
+	var i Blacklist
+	err := row.Scan(
+		&i.GuildID,
+		&i.EntityType,
+		&i.EntityID,
+		&i.Reason,
+		&i.AddedBy,
+		&i.IsHidden,
+		&i.ExpiresAt,
+		&i.AddedAt,
+	)
+	return i, err
 }
 
-const listBlacklist = `-- name: ListBlacklist :many
-SELECT entity_type, entity_id, added_by, added_at
-FROM blacklist ORDER BY entity_id
+const listGuildBlacklist = `-- name: ListGuildBlacklist :many
+SELECT guild_id, entity_type, entity_id, reason, added_by, is_hidden, expires_at, added_at
+FROM blacklist 
+WHERE guild_id = ?1
+ORDER BY added_at DESC
+LIMIT ?3 OFFSET ?2
 `
 
-func (q *Queries) ListBlacklist(ctx context.Context) ([]Blacklist, error) {
-	rows, err := q.db.QueryContext(ctx, listBlacklist)
+type ListGuildBlacklistParams struct {
+	GuildId   string `json:"guildId"`
+	OffsetVal int64  `json:"offsetVal"`
+	LimitVal  int64  `json:"limitVal"`
+}
+
+func (q *Queries) ListGuildBlacklist(ctx context.Context, arg ListGuildBlacklistParams) ([]Blacklist, error) {
+	rows, err := q.db.QueryContext(ctx, listGuildBlacklist, arg.GuildId, arg.OffsetVal, arg.LimitVal)
 	if err != nil {
 		return nil, err
 	}
@@ -56,9 +185,13 @@ func (q *Queries) ListBlacklist(ctx context.Context) ([]Blacklist, error) {
 	for rows.Next() {
 		var i Blacklist
 		if err := rows.Scan(
+			&i.GuildID,
 			&i.EntityType,
 			&i.EntityID,
+			&i.Reason,
 			&i.AddedBy,
+			&i.IsHidden,
+			&i.ExpiresAt,
 			&i.AddedAt,
 		); err != nil {
 			return nil, err
@@ -74,11 +207,33 @@ func (q *Queries) ListBlacklist(ctx context.Context) ([]Blacklist, error) {
 	return items, nil
 }
 
-const removeBlacklist = `-- name: RemoveBlacklist :exec
-DELETE FROM blacklist WHERE entity_id = ?1
+const pruneExpiredBlacklists = `-- name: PruneExpiredBlacklists :execrows
+DELETE FROM blacklist 
+WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP
 `
 
-func (q *Queries) RemoveBlacklist(ctx context.Context, entityid int64) error {
-	_, err := q.db.ExecContext(ctx, removeBlacklist, entityid)
+func (q *Queries) PruneExpiredBlacklists(ctx context.Context) (int64, error) {
+	result, err := q.db.ExecContext(ctx, pruneExpiredBlacklists)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const removeBlacklist = `-- name: RemoveBlacklist :exec
+DELETE FROM blacklist 
+WHERE guild_id = ?1 
+  AND entity_type = ?2 
+  AND entity_id = ?3
+`
+
+type RemoveBlacklistParams struct {
+	GuildId    string `json:"guildId"`
+	EntityType string `json:"entityType"`
+	EntityId   string `json:"entityId"`
+}
+
+func (q *Queries) RemoveBlacklist(ctx context.Context, arg RemoveBlacklistParams) error {
+	_, err := q.db.ExecContext(ctx, removeBlacklist, arg.GuildId, arg.EntityType, arg.EntityId)
 	return err
 }

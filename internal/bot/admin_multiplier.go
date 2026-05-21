@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
+	"github.com/disgoorg/snowflake/v2"
 
 	"github.com/bufferwise/levelr/internal/cache"
 	db "github.com/bufferwise/levelr/internal/db/sqlc"
@@ -88,6 +90,35 @@ func HandleMultiplierSet(queries *db.Queries, cacheClient *cache.Client) handler
 		}
 
 		cacheClient.InvalidateMultiplier(ctx, eType, id)
+
+		// Log admin action to Discord log channel
+		actorMention := fmt.Sprintf("<@%d>", e.User().ID)
+		var targetMention string
+		if eType == "channel" {
+			targetMention = fmt.Sprintf("<#%d>", id)
+		} else {
+			targetMention = fmt.Sprintf("<@&%d>", id)
+		}
+		now := time.Now()
+		adminLogEmbed := discord.Embed{
+			Title: "π Multiplier Set",
+			Description: fmt.Sprintf(
+				"**Actor:** %s\n**Target:** %s (`%d`)\n**Type:** %s\n**Value:** **%.2fx**",
+				actorMention, targetMention, id, eType, val,
+			),
+			Color: 0x61AFEF,
+			Timestamp: &now,
+		}
+		go func() {
+			_, _ = e.Client().Rest.CreateMessage(snowflake.ID(1414167220262539385), discord.NewMessageCreate().
+				WithEmbeds(adminLogEmbed).
+				WithAllowedMentions(&discord.AllowedMentions{
+					Parse: []discord.AllowedMentionType{}, // No pings
+				}).
+				WithFlags(discord.MessageFlagSuppressNotifications), // Silent message
+			)
+		}()
+
 		return handler.RespondEphemeral(e, fmt.Sprintf("π Set %s `%d` multiplier to **%0.2fx**.", eType, id, val))
 	}
 }
@@ -105,6 +136,35 @@ func HandleMultiplierRemove(queries *db.Queries, cacheClient *cache.Client) hand
 		}
 
 		cacheClient.InvalidateMultiplier(ctx, eType, id)
+
+		// Log admin action to Discord log channel
+		actorMention := fmt.Sprintf("<@%d>", e.User().ID)
+		var targetMention string
+		if eType == "channel" {
+			targetMention = fmt.Sprintf("<#%d>", id)
+		} else {
+			targetMention = fmt.Sprintf("<@&%d>", id)
+		}
+		now := time.Now()
+		adminLogEmbed := discord.Embed{
+			Title: "π Multiplier Removed",
+			Description: fmt.Sprintf(
+				"**Actor:** %s\n**Target:** %s (`%d`)\n**Type:** %s",
+				actorMention, targetMention, id, eType,
+			),
+			Color: 0xE5C07B,
+			Timestamp: &now,
+		}
+		go func() {
+			_, _ = e.Client().Rest.CreateMessage(snowflake.ID(1414167220262539385), discord.NewMessageCreate().
+				WithEmbeds(adminLogEmbed).
+				WithAllowedMentions(&discord.AllowedMentions{
+					Parse: []discord.AllowedMentionType{}, // No pings
+				}).
+				WithFlags(discord.MessageFlagSuppressNotifications), // Silent message
+			)
+		}()
+
 		return handler.RespondEphemeral(e, fmt.Sprintf("π Removed %s `%d` multiplier.", eType, id))
 	}
 }

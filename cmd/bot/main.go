@@ -18,8 +18,10 @@ import (
 	"github.com/bufferwise/levelr/internal/handler"
 	"github.com/bufferwise/levelr/internal/module"
 	"github.com/bufferwise/levelr/internal/modules/drops"
+	"github.com/bufferwise/levelr/internal/modules/giveaways"
 	"github.com/bufferwise/levelr/internal/modules/leveling"
 	"github.com/bufferwise/levelr/internal/modules/presence"
+	"github.com/bufferwise/levelr/internal/modules/sidekicks"
 	"github.com/bufferwise/levelr/internal/services"
 	"github.com/lmittmann/tint"
 )
@@ -70,7 +72,7 @@ func main() {
 
 	// Internal core services bound structurally.
 	notifSvc := services.NewNotifier(client, cfg)
-	blSvc := services.NewBlacklistService(queries, vkClient)
+	blSvc := services.NewBlacklistService(sqliteDB, queries, vkClient)
 	multSvc := services.NewMultiplierService(queries, vkClient)
 
 	// Initialize the modular interaction router
@@ -96,6 +98,12 @@ func main() {
 		registry.Register(presenceMod)
 	}
 
+	sidekickMod := sidekicks.New(cfg, client)
+	registry.Register(sidekickMod)
+
+	giveawayMod := giveaways.New(cfg, queries, client)
+	registry.Register(giveawayMod)
+
 	// Combine module contributions for Admin Command
 	var adminContribs []module.AdminSubDef
 	for _, m := range registry.Modules() {
@@ -106,8 +114,12 @@ func main() {
 	adminCmd := appbot.BuildAdminCommand(adminContribs)
 
 	// Route internal core bot commands dynamically strictly checking conditions functionally
-	router.SubCommandGroup("admin", "blacklist", "add", appbot.HandleBlacklistAdd(queries, vkClient))
-	router.SubCommandGroup("admin", "blacklist", "remove", appbot.HandleBlacklistRemove(queries, vkClient))
+	router.SubCommandGroup("admin", "blacklist", "add", appbot.HandleBlacklistAdd(blSvc))
+	router.SubCommandGroup("admin", "blacklist", "remove", appbot.HandleBlacklistRemove(blSvc))
+	router.SubCommandGroup("admin", "blacklist", "list", appbot.HandleBlacklistList(blSvc))
+	router.SubCommandGroup("admin", "blacklist", "logs", appbot.HandleBlacklistLogs(blSvc))
+	router.Button("blacklist_list:", appbot.HandleBlacklistListButton(blSvc))
+	router.Button("blacklist_logs:", appbot.HandleBlacklistLogsButton(blSvc))
 	router.SubCommandGroup("admin", "multiplier", "set", appbot.HandleMultiplierSet(queries, vkClient))
 	router.SubCommandGroup("admin", "multiplier", "remove", appbot.HandleMultiplierRemove(queries, vkClient))
 
@@ -117,6 +129,8 @@ func main() {
 		appbot.OnGuildsReadyHandler(cfg, vkClient),
 		router.CommandListener(),
 		router.ButtonListener(),
+		router.SelectListener(),
+		router.ModalListener(),
 	)
 
 	// Boot up modules generically structurally (collecting commands and listeners)

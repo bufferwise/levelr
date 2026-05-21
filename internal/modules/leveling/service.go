@@ -118,6 +118,9 @@ func (s *XPService) AwardMessageXP(ctx context.Context, userID, guildID uint64, 
 		return err
 	}
 
+	// Log message XP to Discord asynchronously to prevent blocking the gateway event loop
+	go s.Notify.LogMessageXP(context.Background(), userID, xpToAward, finalXP, int64(newLevel))
+
 	// Always increment message count (using the atomic UPSERT query I just updated)
 	_ = s.queries.IncrementMessageCount(ctx, db.IncrementMessageCountParams{
 		UserId:  strconv.FormatUint(userID, 10),
@@ -134,9 +137,9 @@ func (s *XPService) AwardMessageXP(ctx context.Context, userID, guildID uint64, 
 		slog.Error("failed to update weekly message count", slog.Uint64("user_id", userID), slog.Any("err", err))
 	}
 
-	// Trigger notifications and roles if level changed
+	// Trigger notifications and roles if level changed asynchronously to prevent blocking the gateway event loop
 	if levelUpHappened {
-		CheckLevelUp(ctx, s.client, snowflake.ID(guildID), snowflake.ID(userID), int(user.Level), int(newLevel), s.Notify.SendLevelUpEmbed)
+		go CheckLevelUp(context.Background(), s.client, snowflake.ID(guildID), snowflake.ID(userID), int(user.Level), int(newLevel), s.Notify.SendLevelUpEmbed)
 	}
 
 	return nil
@@ -185,6 +188,9 @@ func (s *XPService) AwardVoiceXP(ctx context.Context, userID, guildID uint64, xp
 		return err
 	}
 
+	// Log voice XP to Discord asynchronously to prevent blocking the gateway event loop
+	go s.Notify.LogVoiceXP(context.Background(), userID, xpToAward, newXP, int64(newLevel))
+
 	// Increment voice minutes
 	_ = s.queries.IncrementVoiceMinutes(ctx, db.IncrementVoiceMinutesParams{
 		UserId:  strconv.FormatUint(userID, 10),
@@ -201,9 +207,9 @@ func (s *XPService) AwardVoiceXP(ctx context.Context, userID, guildID uint64, xp
 		slog.Error("failed to update weekly voice minutes", slog.Uint64("user_id", userID), slog.Any("err", err))
 	}
 
-	// Role assignment and notification
+	// Role assignment and notification asynchronously to prevent blocking the gateway event loop
 	if levelUpHappened {
-		CheckLevelUp(ctx, s.client, snowflake.ID(guildID), snowflake.ID(userID), oldLevel, int(newLevel), s.Notify.SendLevelUpEmbed)
+		go CheckLevelUp(context.Background(), s.client, snowflake.ID(guildID), snowflake.ID(userID), oldLevel, int(newLevel), s.Notify.SendLevelUpEmbed)
 	}
 
 	return nil

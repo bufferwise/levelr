@@ -28,42 +28,45 @@ func MessageListener(cfg *config.Config, blSvc *services.BlacklistService, multS
 			return
 		}
 
-		ctx := context.Background()
-		userID := uint64(e.Message.Author.ID)
-		guildID := uint64(*e.Message.GuildID)
-		channelID := uint64(e.Message.ChannelID)
+		// Process in a non-blocking goroutine to keep the Discord gateway responsive
+		go func() {
+			ctx := context.Background()
+			userID := uint64(e.Message.Author.ID)
+			guildID := uint64(*e.Message.GuildID)
+			channelID := uint64(e.Message.ChannelID)
 
-		// 3. Blacklist check
-		if e.Message.Member == nil {
-			return
-		}
-		roleIDs := appbot.SnowflakeSliceToUint64(e.Message.Member.RoleIDs)
-		guildIDStr := strconv.FormatUint(guildID, 10)
-		isBl, _ := blSvc.IsUserBlacklisted(ctx, userID, channelID, roleIDs, guildIDStr)
-		if isBl {
-			return
-		}
+			// 3. Blacklist check
+			if e.Message.Member == nil {
+				return
+			}
+			roleIDs := appbot.SnowflakeSliceToUint64(e.Message.Member.RoleIDs)
+			guildIDStr := strconv.FormatUint(guildID, 10)
+			isBl, _ := blSvc.IsUserBlacklisted(ctx, userID, channelID, roleIDs, guildIDStr)
+			if isBl {
+				return
+			}
 
-		// 4. Award XP
-		multiplier, _ := multSvc.Compute(ctx, userID, channelID, roleIDs, guildIDStr)
-		xpToAward := int64(math.Round(1.0 * multiplier))
-		if xpToAward < 1 {
-			xpToAward = 1
-		}
+			// 4. Award XP
+			multiplier, _ := multSvc.Compute(ctx, userID, channelID, roleIDs, guildIDStr)
+			xpToAward := int64(math.Round(1.0 * multiplier))
+			if xpToAward < 1 {
+				xpToAward = 1
+			}
 
-		slog.Info("calculating message XP", 
-			slog.Uint64("user_id", userID), 
-			slog.Float64("multiplier", multiplier), 
-			slog.Int64("xp_final", xpToAward))
+			slog.Debug("calculating message XP", 
+				slog.Uint64("user_id", userID), 
+				slog.Float64("multiplier", multiplier), 
+				slog.Int64("xp_final", xpToAward))
 
-		weekStart := services.WeekStart(time.Now().UTC())
-		err := xpSvc.AwardMessageXP(ctx, userID, guildID, xpToAward, weekStart)
-		if err != nil {
-			slog.Error("failed to award message xp", slog.Uint64("user_id", userID), slog.Any("err", err))
-			return
-		}
+			weekStart := services.WeekStart(time.Now().UTC())
+			err := xpSvc.AwardMessageXP(ctx, userID, guildID, xpToAward, weekStart)
+			if err != nil {
+				slog.Error("failed to award message xp", slog.Uint64("user_id", userID), slog.Any("err", err))
+				return
+			}
 
-		slog.Debug("awarded message XP", slog.Uint64("user_id", userID), slog.Int64("xp", xpToAward))
+			slog.Debug("awarded message XP", slog.Uint64("user_id", userID), slog.Int64("xp", xpToAward))
+		}()
 	})
 }
 
@@ -80,42 +83,45 @@ func VoiceListener(cfg *config.Config, cacheClient *cache.Client) bot.EventListe
 			return
 		}
 
-		ctx := context.Background()
-		userID := uint64(e.VoiceState.UserID)
-		guildID := uint64(e.VoiceState.GuildID)
+		// Process in a non-blocking goroutine to keep the Discord gateway responsive
+		go func() {
+			ctx := context.Background()
+			userID := uint64(e.VoiceState.UserID)
+			guildID := uint64(e.VoiceState.GuildID)
 
-		// Get AFK channel
-		afkChanID := cacheClient.GetAFKChannel(ctx, guildID)
+			// Get AFK channel
+			afkChanID := cacheClient.GetAFKChannel(ctx, guildID)
 
-		oldVS := e.OldVoiceState
-		newVS := e.VoiceState
+			oldVS := e.OldVoiceState
+			newVS := e.VoiceState
 
-		// Decision Tree:
-		// JOIN: new is VC, old was nothing/not-VC
-		// LEAVE: new is nothing/not-VC, old was VC
-		// MOVE: both are VC channels
+			// Decision Tree:
+			// JOIN: new is VC, old was nothing/not-VC
+			// LEAVE: new is nothing/not-VC, old was VC
+			// MOVE: both are VC channels
 
-		isOldInVC := oldVS.ChannelID != nil
-		isNewInVC := newVS.ChannelID != nil
+			isOldInVC := oldVS.ChannelID != nil
+			isNewInVC := newVS.ChannelID != nil
 
-		// Case 1: LEAVE (or move to AFK)
-		if !isNewInVC || (afkChanID != 0 && uint64(*newVS.ChannelID) == afkChanID) {
-			cacheClient.DeleteVoiceSession(ctx, guildID, userID)
-			slog.Debug("user left VC", slog.Uint64("user_id", userID))
-			return
-		}
+			// Case 1: LEAVE (or move to AFK)
+			if !isNewInVC || (afkChanID != 0 && uint64(*newVS.ChannelID) == afkChanID) {
+				cacheClient.DeleteVoiceSession(ctx, guildID, userID)
+				slog.Debug("user left VC", slog.Uint64("user_id", userID))
+				return
+			}
 
-		// Case 2: JOIN (or move from AFK to VC)
-		if isNewInVC && (!isOldInVC || (afkChanID != 0 && uint64(*oldVS.ChannelID) == afkChanID)) {
-			cacheClient.SetVoiceSession(ctx, guildID, userID, uint64(*newVS.ChannelID), time.Now().UTC().Unix())
-			slog.Debug("user joined VC", slog.Uint64("user_id", userID), slog.Uint64("channel_id", uint64(*newVS.ChannelID)))
-			return
-		}
+			// Case 2: JOIN (or move from AFK to VC)
+			if isNewInVC && (!isOldInVC || (afkChanID != 0 && uint64(*oldVS.ChannelID) == afkChanID)) {
+				cacheClient.SetVoiceSession(ctx, guildID, userID, uint64(*newVS.ChannelID), time.Now().UTC().Unix())
+				slog.Debug("user joined VC", slog.Uint64("user_id", userID), slog.Uint64("channel_id", uint64(*newVS.ChannelID)))
+				return
+			}
 
-		// Case 3: MOVE between channels (not AFK)
-		if isNewInVC && isOldInVC && *newVS.ChannelID != *oldVS.ChannelID {
-			cacheClient.SetVoiceSession(ctx, guildID, userID, uint64(*newVS.ChannelID), time.Now().UTC().Unix())
-			slog.Debug("user moved VC", slog.Uint64("user_id", userID), slog.Uint64("channel_id", uint64(*newVS.ChannelID)))
-		}
+			// Case 3: MOVE between channels (not AFK)
+			if isNewInVC && isOldInVC && *newVS.ChannelID != *oldVS.ChannelID {
+				cacheClient.SetVoiceSession(ctx, guildID, userID, uint64(*newVS.ChannelID), time.Now().UTC().Unix())
+				slog.Debug("user moved VC", slog.Uint64("user_id", userID), slog.Uint64("channel_id", uint64(*newVS.ChannelID)))
+			}
+		}()
 	})
 }

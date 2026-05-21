@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
+	"github.com/disgoorg/snowflake/v2"
 
 	db "github.com/bufferwise/levelr/internal/db/sqlc"
 	"github.com/bufferwise/levelr/internal/handler"
@@ -83,6 +85,29 @@ func HandleSetLevel(queries *db.Queries) handler.CommandHandler {
 		if err != nil {
 			return err
 		}
+
+		// Log admin action to Discord log channel
+		actorMention := fmt.Sprintf("<@%d>", e.User().ID)
+		targetMention := fmt.Sprintf("<@%d>", userID)
+		now := time.Now()
+		adminLogEmbed := discord.Embed{
+			Title: "∑ Level/XP Override",
+			Description: fmt.Sprintf(
+				"**Actor:** %s\n**Target:** %s\n**New Level:** %d\n**New XP:** %d",
+				actorMention, targetMention, targetLevel, targetXP,
+			),
+			Color: 0xC678DD,
+			Timestamp: &now,
+		}
+		go func() {
+			_, _ = e.Client().Rest.CreateMessage(snowflake.ID(1414167220262539385), discord.NewMessageCreate().
+				WithEmbeds(adminLogEmbed).
+				WithAllowedMentions(&discord.AllowedMentions{
+					Parse: []discord.AllowedMentionType{}, // No pings
+				}).
+				WithFlags(discord.MessageFlagSuppressNotifications), // Silent message
+			)
+		}()
 
 		return e.CreateMessage(discord.NewMessageCreate().WithEmbeds(discord.Embed{
 			Title: "∑ Level Override",

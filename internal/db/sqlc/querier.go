@@ -10,11 +10,14 @@ import (
 )
 
 type Querier interface {
+	AddAuditLog(ctx context.Context, arg AddAuditLogParams) error
 	AddBlacklist(ctx context.Context, arg AddBlacklistParams) error
 	AddXPDelta(ctx context.Context, arg AddXPDeltaParams) (UsersXp, error)
 	BatchIncrementCounters(ctx context.Context, arg BatchIncrementCountersParams) error
 	ClaimDrop(ctx context.Context, arg ClaimDropParams) (Drop, error)
 	CountEntries(ctx context.Context, giveawayID int64) (int64, error)
+	DeleteEntriesForGiveaway(ctx context.Context, giveawayID int64) error
+	DeleteGiveaway(ctx context.Context, id int64) error
 	EndGiveaway(ctx context.Context, id int64) error
 	GetActiveGiveawayByMessage(ctx context.Context, messageID int64) (Giveaway, error)
 	GetAllTimeMsgLeaderboard(ctx context.Context, arg GetAllTimeMsgLeaderboardParams) ([]GetAllTimeMsgLeaderboardRow, error)
@@ -22,9 +25,12 @@ type Querier interface {
 	GetAllTimeVCLeaderboard(ctx context.Context, arg GetAllTimeVCLeaderboardParams) ([]GetAllTimeVCLeaderboardRow, error)
 	GetAllTimeVCRank(ctx context.Context, arg GetAllTimeVCRankParams) (int64, error)
 	GetAllTimeXPLeaderboard(ctx context.Context, arg GetAllTimeXPLeaderboardParams) ([]GetAllTimeXPLeaderboardRow, error)
+	GetAuditLogs(ctx context.Context, arg GetAuditLogsParams) ([]BlacklistAudit, error)
+	GetBlacklistDetails(ctx context.Context, arg GetBlacklistDetailsParams) (Blacklist, error)
 	GetConfig(ctx context.Context, key string) (string, error)
 	GetDrop(ctx context.Context, id int64) (Drop, error)
 	GetGiveaway(ctx context.Context, id int64) (Giveaway, error)
+	GetGiveawayByMessage(ctx context.Context, messageID int64) (Giveaway, error)
 	GetGuildLeaderboard(ctx context.Context, arg GetGuildLeaderboardParams) ([]GetGuildLeaderboardRow, error)
 	GetGuildUserStats(ctx context.Context, arg GetGuildUserStatsParams) (UsersXp, error)
 	GetMultiplier(ctx context.Context, arg GetMultiplierParams) (float64, error)
@@ -46,12 +52,13 @@ type Querier interface {
 	InsertDrop(ctx context.Context, arg InsertDropParams) (Drop, error)
 	InsertEntry(ctx context.Context, arg InsertEntryParams) error
 	InsertGiveaway(ctx context.Context, arg InsertGiveawayParams) (Giveaway, error)
-	IsBlacklisted(ctx context.Context, arg IsBlacklistedParams) (int64, error)
-	ListBlacklist(ctx context.Context) ([]Blacklist, error)
+	ListActive(ctx context.Context) ([]Giveaway, error)
 	ListEntries(ctx context.Context, giveawayID int64) ([]int64, error)
 	ListExpiredUnended(ctx context.Context) ([]Giveaway, error)
+	ListGuildBlacklist(ctx context.Context, arg ListGuildBlacklistParams) ([]Blacklist, error)
 	ListMultipliers(ctx context.Context) ([]Multiplier, error)
-	RemoveBlacklist(ctx context.Context, entityid int64) error
+	PruneExpiredBlacklists(ctx context.Context) (int64, error)
+	RemoveBlacklist(ctx context.Context, arg RemoveBlacklistParams) error
 	RemoveMultiplier(ctx context.Context, entityid int64) error
 	SetConfig(ctx context.Context, arg SetConfigParams) error
 	SetMultiplier(ctx context.Context, arg SetMultiplierParams) error

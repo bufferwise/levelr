@@ -39,7 +39,7 @@ func New(cfg *config.Config, queries *db.Queries, client *bot.Client, cacheClien
 func (m *Mod) Name() string { return "leveling" }
 
 func (m *Mod) RegisterCommands(router *handler.Router) {
-	router.Command("rank", HandleRank(m.queries))
+	router.Command("rank", HandleRank(m.queries, m.blSvc))
 	router.Command("leaderboard", HandleLeaderboard(m.queries))
 	router.SubCommand("admin", "setlevel", HandleSetLevel(m.queries))
 
@@ -63,6 +63,10 @@ func (m *Mod) Workers() []module.Worker {
 		{
 			Name: "weekly_report",
 			Run:  StartWeeklyReportWorker(m.queries, m.xpSvc.Notify, m.cfg.MainGuildID),
+		},
+		{
+			Name: "blacklist_expiration",
+			Run:  StartBlacklistExpirationWorker(m.blSvc),
 		},
 	}
 }

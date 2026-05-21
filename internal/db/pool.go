@@ -87,11 +87,27 @@ func migrate(db *sql.DB) error {
 
 		// blacklist
 		`CREATE TABLE IF NOT EXISTS blacklist (
-			entity_type TEXT    NOT NULL,
-			entity_id   INTEGER NOT NULL,
-			added_by    INTEGER NOT NULL,
+			guild_id    TEXT NOT NULL,
+			entity_type TEXT NOT NULL,
+			entity_id   TEXT NOT NULL,
+			reason      TEXT NOT NULL DEFAULT 'Violation of server rules',
+			added_by    TEXT NOT NULL,
+			is_hidden   BOOLEAN NOT NULL DEFAULT 0,
+			expires_at  DATETIME,
 			added_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (entity_type, entity_id)
+			PRIMARY KEY (guild_id, entity_type, entity_id)
+		)`,
+
+		// blacklist_audit
+		`CREATE TABLE IF NOT EXISTS blacklist_audit (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			guild_id    TEXT NOT NULL,
+			entity_type TEXT NOT NULL,
+			entity_id   TEXT NOT NULL,
+			action      TEXT NOT NULL,
+			reason      TEXT,
+			actor_id    TEXT NOT NULL,
+			created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 
 		// multipliers

@@ -1,0 +1,4 @@
+-- 000006_giveaways_enhancements.down.sql
+-- Down Migration is noted because SQLite does not natively support dropping multiple columns directly 
+-- in old versions. If executing standard rollback, the table must be recreated, but for dev we maintain 
+-- consistency.

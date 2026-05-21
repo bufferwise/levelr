@@ -1,6 +1,9 @@
 -- name: InsertGiveaway :one
-INSERT INTO giveaways (channel_id, message_id, prize, winner_count, required_role, host_id, ends_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO giveaways (
+    channel_id, message_id, prize, winner_count, required_role, host_id, ends_at,
+    min_level, min_account_days, role_multipliers
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetGiveaway :one
@@ -30,3 +33,15 @@ SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?;
 -- name: HasEntry :one
 SELECT COUNT(*) > 0 AS entered FROM giveaway_entries
 WHERE giveaway_id = ? AND user_id = ?;
+
+-- name: ListActive :many
+SELECT * FROM giveaways WHERE ended = 0;
+
+-- name: GetGiveawayByMessage :one
+SELECT * FROM giveaways WHERE message_id = ?;
+
+-- name: DeleteEntriesForGiveaway :exec
+DELETE FROM giveaway_entries WHERE giveaway_id = ?;
+
+-- name: DeleteGiveaway :exec
+DELETE FROM giveaways WHERE id = ?;

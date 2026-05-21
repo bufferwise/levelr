@@ -80,11 +80,26 @@ CREATE TABLE weekly_xp (
 
 -- Existing system tables (maintained for compatibility)
 CREATE TABLE blacklist (
+    guild_id TEXT NOT NULL,
     entity_type TEXT NOT NULL,
-    entity_id INTEGER NOT NULL,
-    added_by INTEGER NOT NULL,
+    entity_id TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT 'Violation of server rules',
+    added_by TEXT NOT NULL,
+    is_hidden BOOLEAN NOT NULL DEFAULT 0,
+    expires_at DATETIME,
     added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (entity_type, entity_id)
+    PRIMARY KEY (guild_id, entity_type, entity_id)
+);
+
+CREATE TABLE blacklist_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    reason TEXT,
+    actor_id TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE multipliers (
@@ -122,6 +137,9 @@ CREATE TABLE giveaways (
     host_id INTEGER NOT NULL,
     ends_at DATETIME NOT NULL,
     ended BOOLEAN NOT NULL DEFAULT 0,
+    min_level INTEGER NOT NULL DEFAULT 0,
+    min_account_days INTEGER NOT NULL DEFAULT 0,
+    role_multipliers TEXT NOT NULL DEFAULT '{}',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
